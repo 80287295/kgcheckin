@@ -1,33 +1,56 @@
 name: main
+
+# B 方案：外部定时触发（cron-job.org / UptimeRobot 等），不再依赖 GitHub schedule
+# 原因：公共仓库连续 60 天无活动，GitHub 会自动禁用 scheduled workflow（disabled_inactivity）
+# 现在改为：外部服务每天调用 workflow_dispatch API 触发；本工作流每次运行会自动提交一个
+# 心跳文件，使仓库始终"有活动"，彻底绕开 60 天禁用规则。
 on:
   workflow_dispatch:
-  # push:
-  schedule:
-    - cron: 1 16 * * *
+  # 保留 push 触发，方便你手动改配置后立即验证
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
       - name: 检出仓库
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+
       - name: 创建node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 18
-          cache: 'npm'
-          cache-dependency-path: ./api/package-lock.json
+
       - name: Cache node_modules in api directory
         id: cache-npm
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ./api/node_modules
           key: ${{ runner.os }}-node-${{ hashFiles('./api/package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-node-
+
       - name: 安装依赖
         run: npm run install
         if: ${{ steps.cache-npm.outputs.cache-hit != 'true' }}
+
       - name: 签到
         run: npm run main
         env:
           USERINFO: ${{ secrets.USERINFO }}
+
+      # 保活：每次运行都提交一个时间戳，避免仓库 60 天无活动导致工作流被禁用
+      - name: 心跳保活
+        if: always()
+        run: |
+          mkdir -p .heartbeat
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .heartbeat/last-run.txt
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .heartbeat/last-run.txt
+          git commit -m "chore: heartbeat $(date -u +%Y-%m-%d)" || echo "nothing to commit"
+          git push || echo "push skipped"
