@@ -1,12 +1,14 @@
 name: main
 
-# B 方案：外部定时触发（cron-job.org / UptimeRobot 等），不再依赖 GitHub schedule
-# 原因：公共仓库连续 60 天无活动，GitHub 会自动禁用 scheduled workflow（disabled_inactivity）
-# 现在改为：外部服务每天调用 workflow_dispatch API 触发；本工作流每次运行会自动提交一个
-# 心跳文件，使仓库始终"有活动"，彻底绕开 60 天禁用规则。
+# 恢复 GitHub 原生 schedule 定时触发（每天 UTC 17:00 ≈ 北京时间次日 01:00）
+# 说明：GitHub 的「60 天无活动禁用 scheduled workflow」仅针对公共仓库且仓库完全无活动；
+#       本仓库每天签到 + heartbeat 提交，仓库持续有 commit 活动，schedule 不会被禁用。
+#       因此无需外部 cron 服务绕行，改为原生 schedule 更稳定。
 on:
   workflow_dispatch:
-  # 保留 push 触发，方便你手动改配置后立即验证
+  schedule:
+    - cron: '0 17 * * *'
+  # 保留 push 触发，方便手动改配置后立即验证
   push:
     branches: [ main ]
 
@@ -43,7 +45,7 @@ jobs:
         env:
           USERINFO: ${{ secrets.USERINFO }}
 
-      # 保活：每次运行都提交一个时间戳，避免仓库 60 天无活动导致工作流被禁用
+      # 保活：每次运行都提交一个时间戳，避免仓库无活动导致工作流被禁用
       - name: 心跳保活
         if: always()
         run: |
